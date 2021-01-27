@@ -13,6 +13,7 @@
 #include "TList.h"
 #include "TPad.h"
 #include "TMath.h"
+#include <math.h>
 
 #include <cassert>
 
@@ -30,12 +31,9 @@ TH1F *hzpull1 = new TH1F("hzpull1","pull1; (z_{hit}-z_{true})/#sigma; events",10
 TH1F *hzpull2 = new TH1F("hzpull2","pull2; (z_{hit}-z_{true})/#sigma; events",100,-2,2);
 TH1F *hzpull3 = new TH1F("hzpull3","pull3; (z_{hit}-z_{true})/#sigma; events",100,-2,2);
 
-
-
 class Cluster : public TVector3 {
 public:
-  Cluster(double x = 0, double y = 0, double startz = 0, double pitch = 0,unsigned char* strips = 0, 
-	  int nstrips = 0, int layer = 0) : 
+  Cluster(double x = 0, double y = 0, double startz = 0, double pitch = 0,unsigned char* strips = 0, int nstrips = 0, int layer = 0) : 
     TVector3(x,y, startz), fStartz(startz), fPitch(pitch), fNstrips(nstrips), fLayer(layer),
     fErrX(0), fErrY(0), fErrZ(0) {
     for(int i = 0 ; i < fNstrips ; ++i) {
@@ -80,10 +78,10 @@ public:
   
 
 
-  double pt() const { return 0;}//needs changes
+  double pt() const { return 0.003*charge()*Track::B()*r();}//needs changes
 
   double rErr() const { return sqrt(fCov(0,0));}
-  double ptErr() const { return 1000;}//needs changes
+  double ptErr() const { return 0.003*charge()*Track::B()*rErr();}//needs changes
 
 
   double cov(int i, int j) const { return fCov(i,j);}
@@ -96,12 +94,12 @@ public:
   
   void setCov(int i, int j, double c) { fCov(i,j) = c;}
   
-  double x(double lambda) const { return 0;}//needs changes
-  double z(double lambda) const { return 0;}//needs changes
+  double x(double lambda) const { return x0()+charge()*r()*sin(charge()*lambda+phi0());}//needs changes
+  double z(double lambda) const { return z0()-charge()*r()*cos(charge()*lambda+phi0());}//needs changes
   double y(double) const { return 0; }
   
   double lambdaFromX(double posx) const { //needs changes
-    return 0;
+    return (asin((posx-x0())/(charge()*r()))-phi0())/charge();
   }
 
   static double B() {
@@ -146,7 +144,7 @@ unsigned char getSignal(const std::string& n)
   int c = app->depEinNode(n) * 600000;
   //if(c > 0) std::cout << "getSignal for " << n << " :" << c << std::endl;
   //add noise
-  c += gRandom->Gaus(0,3);
+  //c += gRandom->Gaus(0,3);
   //noise cut
   int noisecut = 15;
   if( c < noisecut ) return 0;
@@ -259,7 +257,7 @@ int reconstructHitsWeighted(TObjArray* clusters)
   for(int i = 0 ; i < clusters->GetEntriesFast() ; ++i) {
     Cluster* c = (Cluster*)clusters->At(i);
     //compute weithed mean
-    double sumEvents = 0;
+    double sumSig = 0;
     double meanWeighted = 0;
     double errorWeighted = 0;
     for(int j = 0 ; j < c->nStrips() ; ++j) {
@@ -267,11 +265,11 @@ int reconstructHitsWeighted(TObjArray* clusters)
       int sig = c->signal(j);
       meanWeighted += sig*z;
       errorWeighted += pow(sig, 2);
-      sumEvents += sig;
+      sumSig += sig;
     }
 
-    meanWeighted = meanWeighted / sumEvents;
-    errorWeighted = c->pitch()*sqrt(errorWeighted/12)/sumEvents;
+    meanWeighted = meanWeighted / sumSig;
+    errorWeighted = c->pitch()*sqrt(errorWeighted/12)/sumSig;
     c->SetZ(meanWeighted);
     c->setErrZ(errorWeighted);
   }
@@ -416,11 +414,11 @@ void tracking2()
   geom+=Bfield; geom.Append(")"); 
   app->InitMC(geom); 
 
-  bool doFit = false;
+  bool doFit = true;
 
   // define particle and control parameters of loop   
-  unsigned int nevt = 400;
-  double p = 1.0;
+  unsigned int nevt = 500;
+  double p = 5.0;
   app->SetPrimaryPDG(-13);    // +/-11: PDG code of e+/- 
   /* other PDG codes     22: Photon    +-13: muon   
                      +/-211: pion   +/-2212: proton     */
@@ -455,7 +453,9 @@ void tracking2()
 	}	
 	Track *t = fitTrack(clust);
 	if(draw) t->helix()->Draw();
+	//t->helix()->Draw();
 	hpt->Fill(t->pt());
+	cout << "pt: " << t->pt() << endl;
 	hptpull->Fill((t->pt()-p)/t->ptErr());
       } else {
 	std::cout << "Warning: Not enough hits for track fit.\n";
@@ -471,10 +471,13 @@ void tracking2()
   c->cd(3);
   hlayer3->Draw("hist");
   c->cd(4);
+  //hresid1->Draw();
   hzpull1->Draw();
   c->cd(5);
+  //hresid2->Draw();
   hzpull2->Draw();
   c->cd(6);
+  //hresid3->Draw();
   hzpull3->Draw();
 
   if(doFit) {
